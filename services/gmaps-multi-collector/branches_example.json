@@ -1,0 +1,40 @@
+{
+  "branches": [
+    {
+      "id": 1,
+      "name": "Example Branch 1",
+      "city": "Your City",
+      "district": "District Name",
+      "query": "Your Business Name Location 1 City"
+    },
+    {
+      "id": 2,
+      "name": "Example Branch 2",
+      "city": "Your City",
+      "district": "District Name",
+      "query": "Your Business Name Location 2 City"
+    }
+  ],
+  "instructions": {
+    "how_to_add": "Add your branches following the format above",
+    "id": "Unique ID for each branch (1, 2, 3...)",
+    "name": "Display name for the branch",
+    "city": "City where branch is located",
+    "district": "District or neighborhood",
+    "query": "Search query for Google Maps (in Arabic or English)"
+  },
+  "examples": {
+    "restaurant": {
+      "name": "My Restaurant - Mall Branch",
+      "query": "My Restaurant King Abdullah Mall Riyadh"
+    },
+    "cafe": {
+      "name": "Coffee Shop - Downtown",
+      "query": "Coffee Shop Downtown Business District Dubai"
+    },
+    "retail": {
+      "name": "Electronics Store - Main Street",
+      "query": "Electronics Store Main Street Jeddah"
+    }
+  }
+}
