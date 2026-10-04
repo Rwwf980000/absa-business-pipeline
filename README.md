@@ -1,142 +1,138 @@
-# ABSA Business Reviews Analysis Pipeline
+# ABSA Orchestrator
 
-Complete pipeline for collecting, enriching, and analyzing business reviews using Aspect-Based Sentiment Analysis (ABSA) with Google Gemini AI.
+Pipeline orchestrator that reads reviews from Cloud Storage, processes them through the ABSA enricher, and loads results to BigQuery.
 
-## 📁 Project Structure
+## Purpose
 
-```
-absa-fitness-pipeline/
-├── services/
-│   ├── gmaps-multi-collector/      # Google Maps review collector
-│   │   ├── main.py
-│   │   ├── requirements.txt
-│   │   ├── fitness_time_branches.json
-│   │   └── README.md
-│   │
-│   ├── absa-gemini-enricher/       # Gemini AI sentiment analyzer
-│   │   ├── main.py
-│   │   ├── requirements.txt
-│   │   └── README.md
-│   │
-│   └── absa-orchestrator/          # Pipeline orchestrator
-│       ├── main.py
-│       ├── bigquery_manager.py
-│       ├── requirements.txt
-│       └── README.md
-│
-├── tests/                          # Test files
-│   ├── test_collector.py
-│   ├── test_enricher.py
-│   ├── test_orchestrator.py
-│   └── README.md
-│
-├── .env.example                    # Environment variables template
-├── .gitignore                      # Git ignore rules
-└── README.md                       # This file
-```
+Central coordinator for the ABSA pipeline. Handles data ingestion, deduplication, normalization, enrichment, and BigQuery loading.
 
-## 🎯 Overview
+## Pipeline Architecture
 
-This system processes business reviews through three Cloud Functions:
+![Pipeline Structure](docs/images/pipeline-structure.png)
 
-1. **gmaps-multi-collector**: Collects reviews from Google Maps for multiple business locations
-2. **absa-gemini-enricher**: Analyzes reviews using Gemini AI to extract aspects and sentiment
-3. **absa-orchestrator**: Orchestrates the pipeline, processes data, and loads to BigQuery
+The pipeline runs on two daily schedules and is coordinated end to end by the orchestrator:
 
-### Data Flow
+1. **Data Collection (8:00 AM)** – Reviews are collected from Google Maps, X (Twitter), and manual surveys.
+2. **Staging Area** – Raw files land in Google Cloud Storage (GCS), where light preprocessing is applied.
+3. **Deduplication** – Each review gets a unique ID, which is checked against BigQuery so only new reviews move forward.
+4. **Transformation – The ABSA Engine (8:30 AM)** – New reviews are sent in parallel to Gemini 2.5 Flash, which extracts each aspect mentioned and its sentiment.
+5. **Sinking & Warehousing** – Enriched results are loaded into partitioned BigQuery tables, and analytical views are refreshed.
+6. **Visualization** – Looker Studio dashboards read directly from the BigQuery views.
 
-```
-Google Maps Reviews
-        ↓
-[gmaps-multi-collector] → CSV → Cloud Storage
-        ↓
-[absa-orchestrator] → reads CSV → normalizes text
-        ↓
-[absa-gemini-enricher] → ABSA analysis
-        ↓
-[absa-orchestrator] → BigQuery tables & views
-        ↓
-Analysis Dashboard
-```
+## Features
 
-## 🚀 Quick Start
+- Multi-source support (Google Maps, Twitter, Manual CSV)
+- Automatic deduplication using review IDs
+- Parallel processing with configurable workers
+- BigQuery partitioned tables
+- Automated analytical views creation
+- Arabic text normalization
 
-### Prerequisites
+## Workflow
 
-- Google Cloud Project
-- Google Maps API key (Places API enabled)
-- Gemini API key
-- Cloud Storage bucket
-- BigQuery dataset
+1. Reads latest CSV from Cloud Storage
+2. Creates unique review IDs (MD5 hash)
+3. Filters out already processed reviews
+4. Normalizes Arabic text
+5. Calls Gemini enricher in parallel
+6. Loads results to BigQuery
+7. Updates analytical views
 
-### 1. Clone & Setup
+## Why Gemini 2.5 Flash?
 
-```bash
-git clone <your-repo-url>
-cd absa-fitness-pipeline
+![Gemini 2.5 Flash model choice](docs/images/gemini-model-choice.png)
 
-# Copy environment template
-cp .env.example .env
+Gemini 2.5 Flash (released June 17, 2025) was chosen as the ABSA engine for these reasons:
 
-# Edit .env with your credentials
-nano .env
-```
+- **Hybrid reasoning** – Strong logical reasoning while keeping latency low.
+- **Controllable thinking budget** – Deeper reasoning can be enabled for complex or ambiguous reviews, and kept minimal for simple ones to save time and cost.
+- **1M-token context window** – Large enough to analyze long stretches of historical reviews and track facility "health trends" over time.
+- **Arabic dialect handling** – Handles Saudi dialect, slang, and cultural nuance directly, without a separate translation step.
+- **Native Google Cloud / Vertex AI integration** – Data stays inside the same GCP project as GCS and BigQuery.
+- **Local hosting** – Available in the `me-central2` region (Dammam, Saudi Arabia), the same region the functions are deployed to.
 
-### 2. Configure Environment Variables
+### Scalability & Cost
 
-Edit `.env` with your values:
+| | POC Level (Current) | National Level (Scale) |
+|---|---|---|
+| Review Volume | 200 Reviews | 100,000+ Reviews |
+| Processing Time | < 1 Minute | ~15 Minutes (Parallel) |
+| Estimated AI Cost | ~ $0.05 | ~ $15.00 |
+| Operational Effort | Automated | Automated |
 
-```bash
-# Google Maps API
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key
+Cost estimates are based on [Vertex AI Pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing).
 
-# Gemini AI API
-GEMINI_API_KEY=your_gemini_api_key
+## Results – Initial Observations
 
-# Google Cloud Project
-PROJECT_ID=your-gcp-project-id
-BUCKET_NAME=your-bucket-name
-BQ_DATASET=your-dataset-name
-BQ_TABLE_RAW=your-table-name
+![Initial Observations](docs/images/initial-observations.png)
 
-# URLs (update after deploying functions)
-HANDLER_URL=https://REGION-PROJECT.cloudfunctions.net/absa-gemini-enricher
+Initial evaluation of the POC output:
 
-# Processing
-MAX_WORKERS=2
-```
+| Metric | Score |
+|---|---|
+| Linguistic Logic | 90% |
+| Sarcasm Handling | 80% |
+| Aspect Accuracy | 70% |
+| Operational Integrity & Precision | 98% |
 
-### 3. Deploy Services
+The pipeline itself runs very reliably, and the model reads Arabic text and sarcasm well. Aspect extraction (70%) is the main area for improvement in future iterations.
 
-Deploy in this order:
+## Dashboard Demo
+
+![Looker Studio Dashboard](docs/images/dashboard-demo.png)
+
+The Looker Studio report has two pages:
+
+- **Executive Summary (الملخص التنفيذي)** – Totals for reviews, aspect mentions, and positive/negative mentions; sentiment distribution; most-mentioned aspects; sentiment per aspect; and review volume over time.
+- **Branch Performance (أداء الفروع)** – Sentiment comparison across branches, positive vs. negative mentions per aspect, and a branch table with rating, positive ratio, and an overall sentiment score.
+
+## Environment Variables
+
+- `PROJECT_ID` - GCP Project ID
+- `BUCKET_NAME` - Cloud Storage bucket
+- `BQ_DATASET` - BigQuery dataset name
+- `BQ_TABLE_RAW` - Table name for raw reviews
+- `HANDLER_URL` - URL of gemini enricher function
+- `MAX_WORKERS` - Number of parallel workers (default: 2)
+
+## API Usage
+
+### Process All Sources
 
 ```bash
-# 1. Deploy Gemini Enricher (needed by orchestrator)
-cd services/absa-gemini-enricher
-gcloud functions deploy absa-gemini-enricher \
-  --runtime python312 \
-  --trigger-http \
-  --allow-unauthenticated \
-  --region me-central2 \
-  --set-env-vars GEMINI_API_KEY="${GEMINI_API_KEY}" \
-  --timeout 180s \
-  --memory 512MB
+curl https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator
+```
 
-# Note the function URL and update HANDLER_URL in .env
+### Process Specific Source
 
-# 2. Deploy Google Maps Collector
-cd ../gmaps-multi-collector
-gcloud functions deploy gmaps-multi-collector \
-  --runtime python312 \
-  --trigger-http \
-  --allow-unauthenticated \
-  --region me-central2 \
-  --set-env-vars GOOGLE_MAPS_API_KEY="${GOOGLE_MAPS_API_KEY}",BUCKET_NAME="${BUCKET_NAME}" \
-  --timeout 540s \
-  --memory 512MB
+```bash
+# Google Maps only
+curl "https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator?source=gmaps"
 
-# 3. Deploy Orchestrator
-cd ../absa-orchestrator
+# Twitter only
+curl "https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator?source=twitter"
+
+# Manual CSV only
+curl "https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator?source=manual"
+```
+
+### Response
+
+```json
+{
+  "status": "success",
+  "timestamp": "2025-02-10T13:45:00",
+  "details": {
+    "gmaps": {"status": "success", "records": 85},
+    "twitter": {"status": "no_new_data"},
+    "manual": {"status": "success", "records": 12}
+  }
+}
+```
+
+## Deployment
+
+```bash
 gcloud functions deploy absa-orchestrator \
   --runtime python312 \
   --trigger-http \
@@ -147,151 +143,32 @@ gcloud functions deploy absa-orchestrator \
   --memory 2GB
 ```
 
-### 4. Run the Pipeline
+## BigQuery Views
 
-```bash
-# Step 1: Collect reviews from Google Maps
-curl https://REGION-PROJECT.cloudfunctions.net/gmaps-multi-collector
-
-# Step 2: Process and analyze reviews
-curl https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator
-
-# Or process specific source
-curl "https://REGION-PROJECT.cloudfunctions.net/absa-orchestrator?source=gmaps"
-```
-
-## 📊 Services Details
-
-### gmaps-multi-collector
-- Collects reviews from multiple business branches/locations
-- Searches by business names (Arabic or English)
-- Saves to Cloud Storage as CSV
-- See `services/gmaps-multi-collector/README.md`
-
-### absa-gemini-enricher
-- Analyzes Arabic text using Gemini 2.5 Flash
-- Extracts 11 aspects (cleanliness, quality, staff, service, etc.)
-- Assigns sentiment polarity (positive/negative/neutral)
-- Handles Arabic dialects and sarcasm
-- See `services/absa-gemini-enricher/README.md`
-
-### absa-orchestrator
-- Reads data from Cloud Storage
-- Deduplicates reviews
-- Normalizes Arabic text
-- Calls enricher for ABSA analysis
-- Loads to BigQuery with automatic views
-- See `services/absa-orchestrator/README.md`
-
-## 🧪 Testing
-
-```bash
-cd tests
-
-# Install test dependencies
-pip install -r requirements.txt
-
-# Run all tests
-pytest
-
-# Run specific service tests
-pytest test_collector.py
-pytest test_enricher.py
-pytest test_orchestrator.py
-
-# Run with coverage
-pytest --cov=services --cov-report=html
-```
-
-See `tests/README.md` for testing documentation.
-
-## 📈 BigQuery Views
-
-The orchestrator automatically creates these analytical views:
-
-- `reviews_parsed` - Flattened aspect-level data
-- `aspect_summary` - Aspect mentions by source and polarity
-- `sentiment_by_source` - Sentiment distribution per data source
-- `daily_processing_stats` - Daily processing metrics
+Auto-created views:
+- `reviews_parsed` - Flattened aspect data
+- `aspect_summary` - Aspect distribution
+- `sentiment_by_source` - Sentiment stats
+- `daily_processing_stats` - Daily metrics
 - `top_aspects_by_place` - Top aspects per location
-- `negative_feedback` - All negative sentiment reviews
-- `rating_vs_sentiment` - Correlation between ratings and sentiment
+- `negative_feedback` - Negative reviews
+- `rating_vs_sentiment` - Rating correlation
 
-### Example Query
+## Cloud Storage Structure
 
-```sql
--- Top negative aspects across all branches
-SELECT 
-  aspect,
-  COUNT(*) as mentions,
-  COUNT(DISTINCT place_name) as branches_affected
-FROM `PROJECT.DATASET.reviews_parsed`
-WHERE polarity = 'سلبي'
-GROUP BY aspect
-ORDER BY mentions DESC
-LIMIT 10;
+```
+gs://BUCKET_NAME/
+├── gmaps/
+│   └── fitness_time_all_branches_YYYYMMDD_HHMMSS.csv
+├── twitter/
+│   └── tweets_YYYYMMDD_HHMMSS.csv
+└── manual/
+    └── manual_reviews_YYYYMMDD_HHMMSS.csv
 ```
 
-## 🔒 Security
+## Files
 
-- **Never commit `.env`** - Contains sensitive API keys
-- All secrets use environment variables
-- `.gitignore` blocks sensitive files
-- Use `.env.example` as a template only
-
-## 📝 Environment Variables Reference
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `GOOGLE_MAPS_API_KEY` | Google Maps API key | `AIza...` |
-| `GEMINI_API_KEY` | Google Gemini API key | `AIza...` |
-| `PROJECT_ID` | GCP Project ID | `my-project-123` |
-| `BUCKET_NAME` | Cloud Storage bucket | `absa-reviews` |
-| `BQ_DATASET` | BigQuery dataset | `absa_analysis` |
-| `BQ_TABLE_RAW` | BigQuery table name | `reviews_all_sources` |
-| `HANDLER_URL` | Enricher function URL | `https://...` |
-| `MAX_WORKERS` | Parallel workers | `2` |
-
-## 🐛 Troubleshooting
-
-### Collector Issues
-- **No reviews found**: Check branch names match Google Maps
-- **API quota exceeded**: Increase quota or reduce frequency
-
-### Enricher Issues
-- **Timeout errors**: Reviews too long, increase timeout
-- **Invalid JSON**: Gemini response parsing failed, check prompt
-
-### Orchestrator Issues
-- **Duplicates**: Check review_id generation
-- **BigQuery errors**: Verify permissions and schema
-- **Processing slow**: Increase MAX_WORKERS (max 5 recommended)
-
-## 📚 Additional Resources
-
-- [Google Maps Places API](https://developers.google.com/maps/documentation/places/web-service)
-- [Google Gemini API](https://ai.google.dev/docs)
-- [BigQuery Documentation](https://cloud.google.com/bigquery/docs)
-- [Cloud Functions Documentation](https://cloud.google.com/functions/docs)
-
-## 🤝 Contributing
-
-1. Create a feature branch
-2. Make your changes
-3. Add tests
-4. Submit a pull request
-
-## 📄 License
-
-[Your License Here]
-
-## 👥 Authors
-
-[Your Name/Team]
-
-## 🔄 Version History
-
-- v1.0.0 - Initial release
-  - Google Maps collector
-  - Gemini ABSA enricher
-  - BigQuery orchestrator
+- `main.py` - Main orchestrator function
+- `bigquery_manager.py` - BigQuery utilities
+- `requirements.txt` - Dependencies
+- `docs/images/` - Architecture, model choice, results, and dashboard images
